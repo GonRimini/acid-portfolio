@@ -8,6 +8,13 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "etmazltmcsuvqzqzkfiu.supabase.co",
+        pathname: "/storage/v1/object/public/**",
+      },
+    ],
   },
 }
 
