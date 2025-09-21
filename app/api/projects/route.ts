@@ -1,33 +1,41 @@
-// app/api/projects/route.ts
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 
-export const revalidate = 300 // ISR 5 min
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+export const runtime = 'nodejs'
 
-type MediaType = "image" | "video"
+type MediaType = "image" // <-- solo imágenes
 interface MediaFile { src: string; type: MediaType }
-interface Project {
+interface ProjectFull {
   name: string
   title: string
   subtitle: string
   text: string
+  media: MediaFile[]
   images: MediaFile[]
-  media: MediaFile[] // alias para el front actual
+}
+interface ProjectLite {
+  name: string
+  title: string
+  subtitle: string
+  text: string
+  cover: MediaFile | null
+  count: number
+  types: { image: number; video: number } // mantenemos la forma, video=0
+  media: MediaFile[] // compat: en lite solo [cover] si existe
 }
 
 const IMG_RE = /\.(jpe?g|png|gif|webp|svg)$/i
-const VID_RE = /\.(mp4|mov|avi|webm)$/i
+// const VID_RE = /\.(mp4|mov|avi|webm)$/i  // <- ignorado a propósito
 
 const BUCKET = process.env.SUPABASE_BUCKET || "projects"
 const RAW_PREFIX = (process.env.SUPABASE_PREFIX || "").replace(/^\/|\/$/g, "")
 
-// Une prefijo + ruta sin tocar la barra final del argumento (la REST API es sensible a eso)
 const prefixPath = (p: string) => {
   const right = (p || "").replace(/^\/+/, "")
   return RAW_PREFIX ? `${RAW_PREFIX}/${right}` : right
 }
-
-// Para getPublicUrl (acá sí limpiamos barras sobrantes)
 const withPrefixClean = (p: string) => {
   const clean = (p || "").replace(/^\/|\/$/g, "")
   return RAW_PREFIX ? `${RAW_PREFIX}/${clean}` : clean
@@ -45,7 +53,6 @@ async function restList(dir: string) {
   const url = `${urlBase}/storage/v1/object/list/${BUCKET}`
   const anon = process.env.SUPABASE_ANON_KEY as string
 
-  // intentamos con y sin barra final (la API a veces distingue)
   const tries = [prefixPath(dir.endsWith("/") ? dir : `${dir}/`), prefixPath(dir.replace(/\/+$/, ""))]
   for (const prefix of tries) {
     const res = await fetch(url, {
@@ -76,14 +83,20 @@ const isFolder = (e: any) => !e || e.metadata == null || typeof e.metadata.size 
 export async function GET(req: Request) {
   try {
     const supabase = supabaseServer()
-    const url = new URL(req.url)
-    const debug = url.searchParams.get("debug")
+    const debug = req.nextUrl.searchParams.get("debug")
+    const lite = req.nextUrl.searchParams.get("lite") === "1" || req.nextUrl.searchParams.get("lite") === "true"
 
     // 1) order.json
     const of = await supabase.storage.from(BUCKET).download(prefixPath("order.json"))
+    if (!of.data) {
+      console.error("STORAGE/DOWNLOAD ERROR: order.json data is null", {
+        error: of.error
+      })
+      throw new Error(`Failed to download order.json: ${of.error?.message || 'data is null'}`)
+    }
     const order: string[] = JSON.parse(await of.data.text())
 
-    // DEBUG opcional: muestra qué ve la REST API
+    // DEBUG opcional
     if (debug) {
       const diag: any[] = []
       for (const projectName of order) {
@@ -101,7 +114,52 @@ export async function GET(req: Request) {
     }
 
     // 2) proyectos
-    const projects: Project[] = []
+    if (lite) {
+      const projectsLite: ProjectLite[] = []
+
+      for (const projectName of order) {
+        // content.txt
+        const cf = await supabase.storage.from(BUCKET).download(prefixPath(`${projectName}/content.txt`))
+        const content = cf.data ? await cf.data.text() : ""
+        const lines = content.split(/\r?\n/).map((l) => l.trim())
+        const [title = "", subtitle = "", ...rest] = lines
+        const text = rest.join("\n")
+
+        // media listing (solo imágenes)
+        let files = await restList(`${projectName}/images`)
+        let inImages = true
+        if (!files.length) { files = await restList(`${projectName}`); inImages = false }
+
+        const mediaAll: MediaFile[] = []
+        let imgCount = 0
+        for (const f of files) {
+          if (isFolder(f)) continue
+          const name = f.name as string
+          if (!IMG_RE.test(name)) continue // <-- filtra TODO lo que no sea imagen
+          const rel = inImages ? `${projectName}/images/${name}` : `${projectName}/${name}`
+          const { data } = supabase.storage.from(BUCKET).getPublicUrl(withPrefixClean(rel))
+          mediaAll.push({ src: data.publicUrl, type: "image" })
+          imgCount++
+        }
+
+        const cover = mediaAll[0] ?? null
+        projectsLite.push({
+          name: projectName,
+          title, subtitle, text,
+          cover,
+          count: imgCount,                 // solo imágenes
+          types: { image: imgCount, video: 0 }, // video=0
+          media: cover ? [cover] : [],
+        })
+      }
+
+      return NextResponse.json(projectsLite, {
+        headers: { "cache-control": "no-store, no-cache, must-revalidate" },
+      })
+    }
+
+    // FULL (solo imágenes)
+    const projectsFull: ProjectFull[] = []
 
     for (const projectName of order) {
       // content.txt
@@ -111,29 +169,26 @@ export async function GET(req: Request) {
       const [title = "", subtitle = "", ...rest] = lines
       const text = rest.join("\n")
 
-      // 3) media: primero /images (REST), si no hay, raíz del proyecto
+      // media (solo imágenes)
       let files = await restList(`${projectName}/images`)
       let inImages = true
-      if (!files.length) {
-        files = await restList(`${projectName}`)
-        inImages = false
-      }
+      if (!files.length) { files = await restList(`${projectName}`); inImages = false }
 
       const mediaList: MediaFile[] = []
       for (const f of files) {
         if (isFolder(f)) continue
         const name = f.name as string
-        if (!IMG_RE.test(name) && !VID_RE.test(name)) continue
+        if (!IMG_RE.test(name)) continue
         const rel = inImages ? `${projectName}/images/${name}` : `${projectName}/${name}`
         const { data } = supabase.storage.from(BUCKET).getPublicUrl(withPrefixClean(rel))
-        mediaList.push({ src: data.publicUrl, type: VID_RE.test(name) ? "video" : "image" })
+        mediaList.push({ src: data.publicUrl, type: "image" })
       }
 
-      projects.push({ name: projectName, title, subtitle, text, images: mediaList, media: mediaList })
+      projectsFull.push({ name: projectName, title, subtitle, text, images: mediaList, media: mediaList })
     }
 
-    return NextResponse.json(projects, {
-      headers: { "cache-control": "s-maxage=300, stale-while-revalidate=60" },
+    return NextResponse.json(projectsFull, {
+      headers: { "cache-control": "no-store, no-cache, must-revalidate" },
     })
   } catch (err) {
     console.error("api/projects supabase error:", err)

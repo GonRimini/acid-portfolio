@@ -9,9 +9,14 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: 'v0 App',
+  title: 'ACID',
   description: 'Created with v0',
   generator: 'v0.dev',
+  icons: {
+    icon: '/favicon.svg',
+    shortcut: '/favicon.svg',
+    apple: '/favicon.svg',
+  },
 }
 
 export default function RootLayout({
