@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { readFileSync } from "fs"
+import { join } from "path"
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -67,17 +69,26 @@ async function restList(dir: string) {
 
 const isFolder = (e: any) => !e || e.metadata == null || typeof e.metadata.size !== "number"
 
+async function getContentTxt(supabase: ReturnType<typeof supabaseServer>, projectName: string): Promise<string> {
+  const localPath = join(process.cwd(), "public", "projects", projectName, "content.txt")
+  try {
+    return readFileSync(localPath, "utf-8")
+  } catch {
+    const cf = await supabase.storage.from(BUCKET).download(prefixPath(`${projectName}/content.txt`))
+    return cf.data ? await cf.data.text() : ""
+  }
+}
+
 export async function GET(
   _req: Request,
-  ctx: { params: { name: string } }
+  ctx: { params: Promise<{ name: string }> }
 ) {
   try {
     const supabase = supabaseServer()
-    const projectName = decodeURIComponent(ctx.params.name)
+    const { name } = await ctx.params
+    const projectName = decodeURIComponent(name)
 
-    // content
-    const cf = await supabase.storage.from(BUCKET).download(prefixPath(`${projectName}/content.txt`))
-    const content = cf.data ? await cf.data.text() : ""
+    const content = await getContentTxt(supabase, projectName)
     const lines = content.split(/\r?\n/).map((l) => l.trim())
     const [title = "", subtitle = "", ...rest] = lines
     const text = rest.join("\n")
@@ -112,8 +123,9 @@ export async function GET(
     })
   } catch (err) {
     console.error("api/projects/[name] error:", err)
+    const fallbackName = await ctx.params.then(p => p.name).catch(() => "unknown")
     return NextResponse.json(
-      { name: ctx.params.name, title: "", subtitle: "", text: "", media: [], count: 0, types: { image: 0, video: 0 } },
+      { name: fallbackName, title: "", subtitle: "", text: "", media: [], count: 0, types: { image: 0, video: 0 } },
       { status: 200 }
     )
   }

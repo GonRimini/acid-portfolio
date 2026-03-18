@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { readFileSync } from "fs"
+import { join } from "path"
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -80,6 +82,16 @@ async function restList(dir: string) {
 
 const isFolder = (e: any) => !e || e.metadata == null || typeof e.metadata.size !== "number"
 
+async function getContentTxt(supabase: ReturnType<typeof supabaseServer>, projectName: string): Promise<string> {
+  const localPath = join(process.cwd(), "public", "projects", projectName, "content.txt")
+  try {
+    return readFileSync(localPath, "utf-8")
+  } catch {
+    const cf = await supabase.storage.from(BUCKET).download(prefixPath(`${projectName}/content.txt`))
+    return cf.data ? await cf.data.text() : ""
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const supabase = supabaseServer()
@@ -118,9 +130,7 @@ export async function GET(req: Request) {
       const projectsLite: ProjectLite[] = []
 
       for (const projectName of order) {
-        // content.txt
-        const cf = await supabase.storage.from(BUCKET).download(prefixPath(`${projectName}/content.txt`))
-        const content = cf.data ? await cf.data.text() : ""
+        const content = await getContentTxt(supabase, projectName)
         const lines = content.split(/\r?\n/).map((l) => l.trim())
         const [title = "", subtitle = "", ...rest] = lines
         const text = rest.join("\n")
@@ -162,9 +172,7 @@ export async function GET(req: Request) {
     const projectsFull: ProjectFull[] = []
 
     for (const projectName of order) {
-      // content.txt
-      const cf = await supabase.storage.from(BUCKET).download(prefixPath(`${projectName}/content.txt`))
-      const content = cf.data ? await cf.data.text() : ""
+      const content = await getContentTxt(supabase, projectName)
       const lines = content.split(/\r?\n/).map((l) => l.trim())
       const [title = "", subtitle = "", ...rest] = lines
       const text = rest.join("\n")

@@ -114,38 +114,44 @@
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+  .text-balance { text-wrap: balance; }
 }
 
+/* ===== Base reset + tipo Cargo (14.5px / 1.65) ===== */
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
+  * { @apply border-border outline-ring/50; }
+
+  html { font-size: 14.5px; } /* match Cargo */
+
   body {
     @apply bg-background text-foreground;
     font-family: "Helvetica Light", "Helvetica", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", Arial, sans-serif;
     font-weight: 300;
+    line-height: 1.65;        /* match Cargo */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 }
 
 /* Custom scrollbar for webkit browsers */
-::-webkit-scrollbar {
-  width: 6px;
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f1f1f1; }
+::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+/* Índice (panel izquierdo, desktop): igualar interlineado a Cargo */
+@media (min-width: 768px) {
+  /* Botón del item */
+  .fixed.left-0.w-\[58\%\].p-8 nav ul li > button {
+    font-size: 27.5px;      /* ≈ Monument 11.91px */
+    line-height: 13x;     /* interlineado compacto */
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  /* Span del número "00." para que calce exactamente */
+  .fixed.left-0.w-\[58\%\].p-8 nav ul li > button > span:first-child {
+    line-height: 13.7px;
+  }
 }
 
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
 
-::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-}
